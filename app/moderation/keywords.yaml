@@ -1,0 +1,11 @@
+# Простые regex-паттерны. Категория и причина для лога.
+patterns:
+  - pattern: "(?i)\\b(убей|kill|murder)\\b"
+    category: "violence"
+    reason: "explicit violence"
+  - pattern: "(?i)\\b(наркотик|drugs|cocaine|heroin)\\b"
+    category: "illegal"
+    reason: "illegal substances"
+  - pattern: "(?i)\\b(суицид|suicide|self[- ]harm)\\b"
+    category: "self-harm"
+    reason: "self-harm content"

@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: llm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: chat
+      POSTGRES_DB: chat
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U chat -d chat" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+  # --- Phoenix ---
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006" # UI Phoenix
+      - "4317:4317" # gRPC OTLP endpoint
+    environment:
+      PHOENIX_WORKING_DIR: /data
+    volumes:
+      - phoenix-data:/data
+
+  # --- Backend Б4.1 (FastAPI + LLM) ---
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-service:v1
+    container_name: llm-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:4317
+      CHAT_STORAGE_DIR: /app/var/chats
+      BOT_URL: http://bot:9000
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      DATABASE_URL: postgresql+asyncpg://chat:chat@postgres:5432/chat
+    volumes:
+      - chats-data:/app/var/chats
+    depends_on:
+      phoenix:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else sys.exit(1)"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # --- Telegram-бот (тонкий клиент) ---
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    image: llm-bot:v1
+    container_name: llm-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: http://app:8000
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      BOT_API_PORT: "9000"
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      BOT_ADMIN_IDS: ${BOT_ADMIN_IDS}
+    ports:
+      - "9000:9000"
+    depends_on:
+      app:
+        condition: service_healthy
+    # Портов нет: long polling
+
+  # --- Redis ---
+  redis:
+    image: redis:7.4-alpine
+    container_name: llm-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  phoenix-data:
+  redis_data:
+  chats-data:
+  pg-data:
